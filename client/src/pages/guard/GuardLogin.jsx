@@ -5,6 +5,8 @@ import { useAuth } from '../../context/AuthContext';
 import './GuardLogin.css';
 import '../GoogleAuth.css';
 
+const API = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+
 const GoogleIcon = () => (
   <svg className="google-icon" width="20" height="20" viewBox="0 0 24 24">
     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -16,15 +18,27 @@ const GoogleIcon = () => (
 
 export default function GuardLogin() {
   const navigate = useNavigate();
-  const { loginWithGoogle, user, role, loading, authError } = useAuth();
+  const { loginWithGoogle, logout, getIdToken, user, role, loading, authError } = useAuth();
   const [signingIn, setSigningIn] = useState(false);
   const [localError, setLocalError] = useState('');
 
   useEffect(() => {
-    if (!loading && user && role === 'guard') {
-      navigate('/guard/dashboard', { replace: true });
+    if (!loading && user) {
+      if (role === 'guard') {
+        // Auto-start shift when guard logs in
+        getIdToken().then(token => {
+          fetch(`${API}/api/shifts/start`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {}); // silent — shift may already be active
+        });
+        navigate('/guard/dashboard', { replace: true });
+      } else {
+        setLocalError(`Access Denied: This account is registered as a ${role.toUpperCase()}. Please use the correct portal or sign in with a different account.`);
+        logout();
+      }
     }
-  }, [user, role, loading, navigate]);
+  }, [user, role, loading, navigate, getIdToken, logout]);
 
   const handleGoogleLogin = async () => {
     setLocalError('');

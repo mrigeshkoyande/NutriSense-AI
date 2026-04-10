@@ -3,7 +3,8 @@ import {
   Users, AlertTriangle, ShieldCheck, Clock, TrendingUp,
   Eye, ChevronRight, ArrowUpRight,
   Zap, Shield, AlertCircle, CheckCircle, XCircle, BarChart3,
-  RefreshCw, WifiOff
+  RefreshCw, WifiOff, Camera, Phone, UserCheck, Activity,
+  PhoneCall, MapPin, Timer
 } from 'lucide-react';
 import { getTrustColor } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
@@ -12,13 +13,17 @@ import './Dashboard.css';
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 export default function Dashboard({ userUnit }) {
-  const { getIdToken, user } = useAuth();
+  const { getIdToken, user, role } = useAuth();
 
   // Real data state
-  const [visitors, setVisitors] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [visitors,     setVisitors]     = useState([]);
+  const [stats,        setStats]        = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState(null);
+  // Guard-specific state
+  const [checkpoints,  setCheckpoints]  = useState([]);
+  const [pendingCalls, setPendingCalls] = useState([]);
+  const [endingShift,  setEndingShift]  = useState(false);
 
   const [animatedStats, setAnimatedStats] = useState({
     totalVisitors: 0, todayVisitors: 0, activeAlerts: 0, pendingApprovals: 0
@@ -31,24 +36,69 @@ export default function Dashboard({ userUnit }) {
       const token = await getIdToken();
       const headers = { Authorization: `Bearer ${token}` };
 
-      const [visRes, statsRes] = await Promise.all([
+      const fetches = [
         fetch(`${API}/api/visitors?limit=8`, { headers }),
-        fetch(`${API}/api/admin/stats`, { headers }),
-      ]);
+        fetch(`${API}/api/admin/stats`,     { headers }),
+      ];
+
+      // Guard-specific: checkpoints + pending calls
+      if (role === 'guard') {
+        fetches.push(fetch(`${API}/api/checkpoints/active`, { headers }));
+        fetches.push(fetch(`${API}/api/guards/calls`,       { headers }));
+      }
+
+      const [visRes, statsRes, cpRes, callsRes] = await Promise.all(fetches);
 
       const visData  = await visRes.json();
       const statData = statsRes.ok ? await statsRes.json() : null;
 
       setVisitors(visData.visitors || []);
       setStats(statData?.stats || null);
+
+      if (role === 'guard') {
+        const cpData    = cpRes?.ok    ? await cpRes.json()    : {};
+        const callsData = callsRes?.ok ? await callsRes.json() : {};
+        setCheckpoints(
+          ((cpData.active || []).map(cp => ({
+            ...cp,
+            // server sends seconds_left, Dashboard template uses seconds_remaining
+            seconds_remaining: cp.seconds_left ?? cp.seconds_remaining ?? 0,
+          }))).slice(0, 5)
+        );
+        setPendingCalls((callsData.calls || []).filter(c => c.status === 'pending').slice(0, 5));
+      }
     } catch (e) {
       setError('Could not reach server. Is the backend running?');
     } finally {
       setLoading(false);
     }
-  }, [getIdToken]);
+  }, [getIdToken, role]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const endShift = async () => {
+    setEndingShift(true);
+    try {
+      const token = await getIdToken();
+      await fetch(`${API}/api/shifts/end`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {}
+    setEndingShift(false);
+  };
+
+  const respondCall = async (callId, status) => {
+    try {
+      const token = await getIdToken();
+      await fetch(`${API}/api/guards/call/${callId}/respond`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      setPendingCalls(prev => prev.filter(c => c.id !== callId));
+    } catch {}
+  };
 
   // Animate counters when stats load
   useEffect(() => {
@@ -360,6 +410,139 @@ export default function Dashboard({ userUnit }) {
           </div>
         </div>
       </div>
+
+      {/* ── Guard-Specific Panels ─────────────────────────────── */}
+      {role === 'guard' && (
+        <div className="guard-dashboard-panels">
+
+          {/* Quick Actions */}
+          <div className="dash-card guard-actions-card animate-fade-in-up">
+            <div className="card-header">
+              <div>
+                <h3>Quick Actions</h3>
+                <p className="card-subtitle">Guard station controls</p>
+              </div>
+            </div>
+            <div className="guard-quick-actions">
+              <a href="/guard/visitors" className="gqa-btn primary" id="gqa-new-visitor">
+                <Users size={18} />
+                <span>Log Visitor</span>
+              </a>
+              <a href="/guard/cameras" className="gqa-btn blue" id="gqa-cameras">
+                <Camera size={18} />
+                <span>View Cameras</span>
+              </a>
+              <a href="/guard/visitor-logs" className="gqa-btn green" id="gqa-logs">
+                <Activity size={18} />
+                <span>Visitor Logs</span>
+              </a>
+              <button
+                className="gqa-btn red"
+                onClick={endShift}
+                disabled={endingShift}
+                id="gqa-end-shift"
+              >
+                {endingShift ? <RefreshCw size={18} className="spin" /> : <Shield size={18} />}
+                <span>{endingShift ? 'Ending…' : 'End Shift'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Active Checkpoint Timers */}
+          <div className="dash-card guard-checkpoints-card animate-fade-in-up">
+            <div className="card-header">
+              <div>
+                <h3>Active Checkpoints</h3>
+                <p className="card-subtitle">Visitors in transit — 21s timer</p>
+              </div>
+              <div className="live-indicator">
+                <span className="live-dot" />
+                LIVE
+              </div>
+            </div>
+            <div className="guard-checkpoints-list">
+              {checkpoints.length === 0 ? (
+                <div className="no-data-message">
+                  <Timer size={24} />
+                  <p>No active visitor checkpoints</p>
+                </div>
+              ) : checkpoints.map((cp, i) => {
+                const remaining = cp.seconds_remaining ?? 0;
+                const pct       = Math.max(0, Math.min(100, (remaining / 21) * 100));
+                const color     = remaining > 10 ? '#34d399' : remaining > 5 ? '#fbbf24' : '#f87171';
+                return (
+                  <div key={cp.id || i} className="gcp-item" style={{ animationDelay: `${i * 0.07}s` }}>
+                    <div className="gcp-icon" style={{ background: `${color}18`, color }}>
+                      <MapPin size={14} />
+                    </div>
+                    <div className="gcp-info">
+                      <span className="gcp-name">{cp.visitor?.name || 'Unknown'}</span>
+                      <span className="gcp-checkpoint">{(cp.checkpoint || '').replace(/_/g, ' ')}</span>
+                    </div>
+                    <div className="gcp-timer" style={{ color }}>
+                      <div
+                        className="gcp-timer-bar"
+                        style={{ width: `${pct}%`, background: color }}
+                      />
+                      <span>{Math.max(0, Math.round(remaining))}s</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Pending Resident Calls */}
+          <div className="dash-card guard-calls-card animate-fade-in-up">
+            <div className="card-header">
+              <div>
+                <h3>Resident Calls</h3>
+                <p className="card-subtitle">Pending requests from residents</p>
+              </div>
+              {pendingCalls.length > 0 && (
+                <span className="pending-count-badge">{pendingCalls.length}</span>
+              )}
+            </div>
+            <div className="guard-calls-list">
+              {pendingCalls.length === 0 ? (
+                <div className="no-data-message">
+                  <Phone size={24} />
+                  <p>No pending resident calls</p>
+                </div>
+              ) : pendingCalls.map((call, i) => (
+                <div key={call.id} className="gcall-item" style={{ animationDelay: `${i * 0.07}s` }}>
+                  <div className="gcall-avatar">
+                    {call.resident?.name?.[0]?.toUpperCase() || 'R'}
+                  </div>
+                  <div className="gcall-info">
+                    <span className="gcall-name">{call.resident?.name || 'Resident'}</span>
+                    <span className="gcall-meta">
+                      Flat {call.resident?.flat_num || '—'} • {call.call_type?.replace(/_/g, ' ')}
+                    </span>
+                    {call.message && <span className="gcall-message">"{call.message}"</span>}
+                  </div>
+                  <div className="gcall-actions">
+                    <button
+                      className="gcall-btn accept"
+                      onClick={() => respondCall(call.id, 'accepted')}
+                      id={`gcall-accept-${call.id}`}
+                    >
+                      <PhoneCall size={12} /> Accept
+                    </button>
+                    <button
+                      className="gcall-btn miss"
+                      onClick={() => respondCall(call.id, 'missed')}
+                      id={`gcall-miss-${call.id}`}
+                    >
+                      Miss
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

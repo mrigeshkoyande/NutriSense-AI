@@ -17,7 +17,9 @@ export function AuthProvider({ children }) {
       setAuthError(null);
       if (fbUser) {
         setFirebaseUser(fbUser);
-        await loadProfile(fbUser);
+        const intendedRole = localStorage.getItem('sentra_intended_role') || 'resident';
+        localStorage.removeItem('sentra_intended_role');
+        await loadProfile(fbUser, intendedRole);
       } else {
         setFirebaseUser(null);
         setProfile(null);
@@ -65,10 +67,9 @@ export function AuthProvider({ children }) {
     setAuthError(null);
     setLoading(true);
     try {
-      const result = await signInWithGoogle();
-      const fbUser = result.user;
-      setFirebaseUser(fbUser);
-      await loadProfile(fbUser, intendedRole);
+      localStorage.setItem('sentra_intended_role', intendedRole);
+      await signInWithGoogle();
+      // Browser will redirect immediately after this call
     } catch (err) {
       setAuthError('google_sign_in_failed');
       setLoading(false);

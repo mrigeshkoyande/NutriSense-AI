@@ -9,7 +9,7 @@
 // ============================================================
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithRedirect, signOut as firebaseSignOut } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'YOUR_API_KEY',
@@ -30,8 +30,8 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-// Sign in with Google popup
-export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
+// Sign in with Google redirect
+export const signInWithGoogle = () => signInWithRedirect(auth, googleProvider);
 
 // Sign out
 export const signOut = () => firebaseSignOut(auth);

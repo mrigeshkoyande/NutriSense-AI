@@ -1,4 +1,4 @@
-import { Search, Shield, Menu, X, AlertTriangle, User } from 'lucide-react';
+import { Search, Shield, Menu, X, AlertTriangle, User, Clock } from 'lucide-react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import NotificationPanel from './NotificationPanel';
@@ -6,16 +6,69 @@ import './Header.css';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
+// Format elapsed seconds into HH:MM:SS
+function formatElapsed(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function useShiftTimer(role, getIdToken) {
+  const [elapsed, setElapsed] = useState(null);   // seconds
+  const [shiftData, setShiftData] = useState(null);
+  const intervalRef = useRef(null);
+
+  const fetchShift = useCallback(async () => {
+    if (role !== 'guard') return;
+    try {
+      const token = await getIdToken();
+      const res   = await fetch(`${API}/api/shifts/current`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data  = await res.json();
+      if (data.shift) {
+        setShiftData(data.shift);
+        setElapsed(data.elapsed_seconds || 0);
+      } else {
+        setShiftData(null);
+        setElapsed(null);
+      }
+    } catch {}
+  }, [role, getIdToken]);
+
+  // Start local ticker once we have elapsed
+  useEffect(() => {
+    if (elapsed === null) return;
+    intervalRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+    return () => clearInterval(intervalRef.current);
+  }, [elapsed !== null]);   // only restart if we transition from null→number
+
+  // Fetch shift on mount and every 60s
+  useEffect(() => {
+    fetchShift();
+    const poll = setInterval(fetchShift, 60000);
+    return () => clearInterval(poll);
+  }, [fetchShift]);
+
+  return { elapsed, shiftData };
+}
+
 export default function Header({ onMenuClick, title, subtitle, role }) {
   const { getIdToken } = useAuth();
-  const [searchOpen, setSearchOpen]     = useState(false);
-  const [searchQuery, setSearchQuery]   = useState('');
+  const [searchOpen,    setSearchOpen]    = useState(false);
+  const [searchQuery,   setSearchQuery]   = useState('');
   const [searchResults, setSearchResults] = useState([]);
-  const [searching, setSearching]       = useState(false);
+  const [searching,     setSearching]     = useState(false);
   const searchRef  = useRef(null);
   const debounceId = useRef(null);
 
-  // Close search on outside click
+  const { elapsed, shiftData } = useShiftTimer(role, getIdToken);
+
+  const isOvertime = elapsed !== null && elapsed >= 12 * 3600;
+  const isWarning  = elapsed !== null && elapsed >= 11 * 3600;
+  const shiftColor = isOvertime ? '#f87171' : isWarning ? '#fbbf24' : '#34d399';
+
   useEffect(() => {
     const handler = (e) => {
       if (
@@ -31,8 +84,6 @@ export default function Header({ onMenuClick, title, subtitle, role }) {
   const handleSearch = useCallback((query) => {
     setSearchQuery(query);
     if (!query.trim()) { setSearchResults([]); return; }
-
-    // Debounce backend search by 350ms
     clearTimeout(debounceId.current);
     debounceId.current = setTimeout(async () => {
       setSearching(true);
@@ -51,7 +102,6 @@ export default function Header({ onMenuClick, title, subtitle, role }) {
         }));
         setSearchResults(visitors);
       } catch {
-        // Fallback: show nothing if server is unreachable
         setSearchResults([]);
       } finally {
         setSearching(false);
@@ -72,6 +122,20 @@ export default function Header({ onMenuClick, title, subtitle, role }) {
       </div>
 
       <div className="header-right">
+        {/* Guard shift timer */}
+        {role === 'guard' && elapsed !== null && (
+          <div
+            className={`shift-timer-badge ${isOvertime ? 'overtime' : isWarning ? 'warning' : 'active'}`}
+            title={`Shift started at ${shiftData?.shift_start ? new Date(shiftData.shift_start).toLocaleTimeString() : '?'}`}
+          >
+            <Clock size={13} />
+            <span className="shift-timer-time" style={{ color: shiftColor }}>
+              {formatElapsed(elapsed)}
+            </span>
+            {isOvertime && <span className="shift-overtime-chip">OVERTIME</span>}
+          </div>
+        )}
+
         {/* Search */}
         <div className={`header-search ${searchOpen ? 'open' : ''}`} ref={searchRef}>
           <Search size={16} className="search-icon" style={{ opacity: searching ? 0.5 : 1, transition: 'opacity 0.2s' }} />
@@ -117,7 +181,6 @@ export default function Header({ onMenuClick, title, subtitle, role }) {
           <Search size={18} />
         </button>
 
-        {/* Real-time notification panel (Supabase-backed) */}
         <NotificationPanel />
 
         <div className="header-divider" />

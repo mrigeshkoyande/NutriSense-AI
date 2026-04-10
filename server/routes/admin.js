@@ -15,13 +15,17 @@ router.post('/users', verifyToken, requireRole('admin'), async (req, res) => {
   const { email, name, role, phone, b_num, b_wing_alphabet, b_floor_num, flat_num } = req.body;
   if (!email || !name || !role) return res.status(400).json({ error: 'email, name and role are required' });
 
-  // firebase_uid is empty until user first logs in — it gets filled on first login
+  // Generate unique user ID: USR-{ROLE}-{TIMESTAMP_BASE36}
+  const rolePrefix = { admin: 'ADM', guard: 'GRD', resident: 'RES' }[role] || 'USR';
+  const userUniqueId = `USR-${rolePrefix}-${Date.now().toString(36).toUpperCase()}`;
+
   const { data, error } = await supabaseAdmin.from('users').insert({
     email, name, role, phone: phone || null,
     b_num: b_num || null, b_wing_alphabet: b_wing_alphabet || null,
     b_floor_num: b_floor_num || null, flat_num: flat_num || null,
-    firebase_uid: 'PENDING_' + Date.now(), // placeholder until first login
+    firebase_uid: 'PENDING_' + Date.now(),
     status: 'active',
+    user_unique_id: userUniqueId,
   }).select().single();
 
   if (error) return res.status(500).json({ error: error.message });
@@ -131,19 +135,36 @@ router.get('/stats', verifyToken, async (req, res) => {
   today.setHours(0, 0, 0, 0);
   const todayISO = today.toISOString();
 
+  // Last 7 days range
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
   try {
-    const [totalRes, todayRes, alertsRes, pendingRes] = await Promise.all([
+    const [totalRes, todayRes, alertsRes, pendingRes, weeklyRes] = await Promise.all([
       supabaseAdmin.from('visitors').select('id', { count: 'exact', head: true }),
       supabaseAdmin.from('visitors').select('id', { count: 'exact', head: true }).gte('entry_time', todayISO),
       supabaseAdmin.from('alerts').select('id', { count: 'exact', head: true }).eq('resolved', false),
       supabaseAdmin.from('visitors').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabaseAdmin.from('visitors').select('entry_time, created_at').gte('created_at', sevenDaysAgo),
     ]);
+
+    // Build weekly breakdown by day name
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const counts = { Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0 };
+    for (const v of (weeklyRes.data || [])) {
+      const d = new Date(v.entry_time || v.created_at);
+      const label = days[d.getDay()];
+      if (counts[label] !== undefined) counts[label]++;
+    }
+    // Return in week order starting Monday
+    const weekly_visitors = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(day => ({ day, count: counts[day] }));
+
     res.json({
       stats: {
         total_visitors:    totalRes.count   || 0,
         today_visitors:    todayRes.count   || 0,
         active_alerts:     alertsRes.count  || 0,
         pending_approvals: pendingRes.count || 0,
+        weekly_visitors,
       }
     });
   } catch (e) {

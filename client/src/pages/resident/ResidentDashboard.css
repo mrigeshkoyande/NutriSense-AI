@@ -897,3 +897,132 @@
     font-size: 1.25rem;
   }
 }
+
+/* ===== Guard Availability Section ===== */
+.res-guard-availability {
+  background: var(--glass-bg, rgba(15,15,35,0.7));
+  border: 1px solid var(--glass-border, rgba(255,255,255,0.08));
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem;
+  animation: fadeInUp 0.4s ease forwards;
+}
+
+.res-guards-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.res-guard-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  flex: 1;
+  min-width: 200px;
+  max-width: 320px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.res-guard-card:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(52,211,153,0.2);
+}
+
+.res-guard-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.res-guard-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(52,211,153,0.3);
+}
+
+.res-guard-avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(52,211,153,0.12);
+  color: #34d399;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 700;
+  border: 2px solid rgba(52,211,153,0.25);
+}
+
+.res-guard-online-dot {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 9px;
+  height: 9px;
+  background: #34d399;
+  border-radius: 50%;
+  border: 2px solid var(--bg-primary, #06060f);
+  animation: pulse 2s infinite;
+}
+
+.res-guard-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.res-guard-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.res-guard-shift {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.res-call-guard-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0.4rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid rgba(52,211,153,0.3);
+  background: rgba(52,211,153,0.1);
+  color: #34d399;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.res-call-guard-btn:hover:not(:disabled) {
+  background: rgba(52,211,153,0.2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(52,211,153,0.2);
+}
+
+.res-call-guard-btn.sent {
+  background: rgba(52,211,153,0.15);
+  border-color: rgba(52,211,153,0.4);
+  color: #34d399;
+}
+
+.res-call-guard-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+

@@ -16,15 +16,20 @@ const GoogleIcon = () => (
 
 export default function ResidentLogin() {
   const navigate = useNavigate();
-  const { loginWithGoogle, user, role, loading, authError } = useAuth();
+  const { loginWithGoogle, logout, user, role, loading, authError } = useAuth();
   const [signingIn, setSigningIn] = useState(false);
   const [localError, setLocalError] = useState('');
 
   useEffect(() => {
-    if (!loading && user && role === 'resident') {
-      navigate('/resident/dashboard', { replace: true });
+    if (!loading && user) {
+      if (role === 'resident') {
+        navigate('/resident/dashboard', { replace: true });
+      } else {
+        setLocalError(`Access Denied: This account is registered as a ${role.toUpperCase()}. Please use the correct portal or sign in with a different account.`);
+        logout();
+      }
     }
-  }, [user, role, loading, navigate]);
+  }, [user, role, loading, navigate, logout]);
 
   const handleGoogleLogin = async () => {
     setLocalError('');

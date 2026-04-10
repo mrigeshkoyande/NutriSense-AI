@@ -3,7 +3,7 @@ import {
   Users, Bell, Shield, Clock, CheckCircle, XCircle, Eye,
   Key, Home, ArrowUpRight, Zap,
   UserPlus, QrCode, RefreshCw, ChevronRight,
-  Package, Wrench, Coffee
+  Package, Wrench, Coffee, Phone, PhoneCall
 } from 'lucide-react';
 import { getTrustColor } from '../../data/mockData';
 import { useAuth } from '../../context/AuthContext';
@@ -40,6 +40,11 @@ export default function ResidentDashboard({ user }) {
   const [otpTarget, setOtpTarget]   = useState(null);
   const [generatedOtp, setGeneratedOtp] = useState(null);
   const [approvingId, setApprovingId] = useState(null);
+  // Guard availability
+  const [availableGuards, setAvailableGuards] = useState([]);
+  const [callingGuardId, setCallingGuardId]   = useState(null);
+  const [guardCallSent, setGuardCallSent]     = useState(null);
+
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -59,6 +64,114 @@ export default function ResidentDashboard({ user }) {
   }, [getIdToken]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ── Fetch available guards ────────────────────────────────
+  const fetchGuards = useCallback(async () => {
+    try {
+      const token = await getIdToken();
+      const res   = await fetch(`${API}/api/guards/available`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      setAvailableGuards(data.guards || []);
+    } catch {}
+  }, [getIdToken]);
+
+  useEffect(() => {
+    fetchGuards();
+    const timer = setInterval(fetchGuards, 30000);
+    return () => clearInterval(timer);
+  }, [fetchGuards]);
+
+  const callGuard = async (guardId) => {
+    setCallingGuardId(guardId);
+    try {
+      const token = await getIdToken();
+      await fetch(`${API}/api/guards/call`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guard_id: guardId, call_type: 'general' }),
+      });
+      setGuardCallSent(guardId);
+      setTimeout(() => setGuardCallSent(null), 8000);
+    } catch {}
+    setCallingGuardId(null);
+  };
+
+  const shiftElapsed = (guard) => {
+    if (!guard?.updated_at) return 'On duty';
+    const mins = Math.floor((Date.now() - new Date(guard.updated_at)) / 60000);
+    if (mins < 60) return `${mins}m on shift`;
+    return `${Math.floor(mins / 60)}h ${mins % 60}m on shift`;
+  };
+
+
+
+  // ── Real-time visitor arrival infotainment popup ─────────
+  const [arrivalPopup,    setArrivalPopup]    = useState(null);  // pending visitor object
+  const [respondingId,    setRespondingId]    = useState(null);
+  const [shownVisitorIds, setShownVisitorIds] = useState(new Set());
+  const [popupCountdown,  setPopupCountdown]  = useState(60);
+
+  // Auto-dismiss countdown when popup is active
+  useEffect(() => {
+    if (!arrivalPopup) { setPopupCountdown(60); return; }
+    setPopupCountdown(60);
+    const ticker = setInterval(() => {
+      setPopupCountdown(prev => {
+        if (prev <= 1) {
+          setArrivalPopup(null);
+          clearInterval(ticker);
+          return 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(ticker);
+  }, [arrivalPopup?.id]);
+
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const token = await getIdToken();
+        // Filter by resident's flat if known
+        const flatParam = userUnit && userUnit !== '—' ? `&flat=${encodeURIComponent(userUnit)}` : '';
+        const res   = await fetch(`${API}/api/visitors?status=pending&limit=5${flatParam}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        const pending = (data.visitors || []).filter(v => {
+          if (shownVisitorIds.has(v.id)) return false;
+          // Only show if targeting this resident's flat (or flat unknown)
+          if (userUnit && userUnit !== '—' && v.target_flat && v.target_flat !== userUnit) return false;
+          return true;
+        });
+        if (pending.length > 0 && !arrivalPopup) {
+          const newest = pending[0];
+          setArrivalPopup(newest);
+          setShownVisitorIds(prev => new Set([...prev, newest.id]));
+        }
+      } catch {}
+    }, 5000);
+    return () => clearInterval(poll);
+  }, [getIdToken, arrivalPopup, shownVisitorIds, userUnit]);
+
+  const respondToArrival = async (action) => {
+    if (!arrivalPopup) return;
+    setRespondingId(arrivalPopup.id);
+    try {
+      const token = await getIdToken();
+      await fetch(`${API}/api/visitors/${arrivalPopup.id}/${action}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setVisitors(prev => prev.map(v =>
+        v.id === arrivalPopup.id ? { ...v, status: action === 'approve' ? 'approved' : 'denied' } : v
+      ));
+      setArrivalPopup(null);
+    } catch {}
+    setRespondingId(null);
+  };
 
   // Animate stats
   useEffect(() => {
@@ -133,6 +246,72 @@ export default function ResidentDashboard({ user }) {
 
   return (
     <div className="resident-dashboard">
+      {/* ── Emergency Infotainment: Visitor Arrival Popup ── */}
+      {arrivalPopup && (
+        <div className="sentra-emergency-overlay" style={{ zIndex: 9990 }}>
+          <div className="sentra-emergency-popup visitor-arrival">
+            <div className="sentra-popup-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>🚪 Visitor at Gate</span>
+              <span style={{
+                fontSize: '0.75rem', fontWeight: 600,
+                background: popupCountdown <= 10 ? 'rgba(248,113,113,0.15)' : 'rgba(34,211,238,0.1)',
+                color: popupCountdown <= 10 ? '#f87171' : '#22d3ee',
+                border: `1px solid ${popupCountdown <= 10 ? 'rgba(248,113,113,0.3)' : 'rgba(34,211,238,0.25)'}`,
+                borderRadius: 8, padding: '2px 10px', fontVariantNumeric: 'tabular-nums',
+              }}>
+                {popupCountdown}s
+              </span>
+            </div>
+            <p className="sentra-popup-subtitle">
+              Someone is at the gate requesting entry to your flat
+              {userUnit !== '—' ? ` (${userUnit})` : ''}. Accept or deny access.
+            </p>
+
+            <div className="sentra-popup-visitor-card">
+              {(arrivalPopup.guard_photo_url || arrivalPopup.photo_url) ? (
+                <img
+                  src={arrivalPopup.guard_photo_url || arrivalPopup.photo_url}
+                  alt={arrivalPopup.name}
+                  className="sentra-popup-visitor-photo"
+                />
+              ) : (
+                <div className="sentra-popup-visitor-avatar">
+                  {arrivalPopup.name?.[0]?.toUpperCase() || '?'}
+                </div>
+              )}
+              <div className="sentra-popup-visitor-info">
+                <span className="sentra-popup-visitor-name">{arrivalPopup.name}</span>
+                <span className="sentra-popup-visitor-detail">
+                  Purpose: {arrivalPopup.purpose || 'Not specified'}<br />
+                  {arrivalPopup.phone && `Phone: ${arrivalPopup.phone}`}
+                </span>
+              </div>
+            </div>
+
+            <div className="sentra-popup-actions">
+              <button
+                className="sentra-popup-btn accept"
+                onClick={() => respondToArrival('approve')}
+                disabled={!!respondingId}
+                id="popup-accept-visitor"
+              >
+                <CheckCircle size={18} />
+                {respondingId === arrivalPopup.id ? 'Accepting…' : 'Allow Entry'}
+              </button>
+              <button
+                className="sentra-popup-btn deny"
+                onClick={() => respondToArrival('deny')}
+                disabled={!!respondingId}
+                id="popup-deny-visitor"
+              >
+                <XCircle size={18} />
+                Deny
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Welcome Banner */}
       <div className="resident-welcome">
         <div className="welcome-text">
@@ -406,8 +585,65 @@ export default function ResidentDashboard({ user }) {
         </div>
       </div>
 
+      {/* ── Guards on Duty ── */}
+      <div className="res-guard-availability">
+        <div className="res-card-header" style={{ marginBottom: '1rem' }}>
+          <div>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>Guards on Duty</h3>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Currently available security personnel</p>
+          </div>
+          <div className="live-badge-sm">
+            <span className="live-dot-sm" />
+            Live
+          </div>
+        </div>
+
+        {availableGuards.length === 0 ? (
+          <div className="res-empty-state small" style={{ padding: '1.25rem' }}>
+            <Shield size={24} />
+            <p>No guards currently on duty</p>
+          </div>
+        ) : (
+          <div className="res-guards-list">
+            {availableGuards.map(guard => {
+              const isCalling = callingGuardId === guard.id;
+              const isSent    = guardCallSent   === guard.id;
+              const avatar    = guard.profile_image_url || guard.avatar_url;
+              return (
+                <div key={guard.id} className="res-guard-card">
+                  <div className="res-guard-avatar-wrap">
+                    {avatar
+                      ? <img src={avatar} alt={guard.name} className="res-guard-avatar" />
+                      : <div className="res-guard-avatar-placeholder">{guard.name?.[0]?.toUpperCase() || 'G'}</div>
+                    }
+                    <span className="res-guard-online-dot" />
+                  </div>
+                  <div className="res-guard-info">
+                    <span className="res-guard-name">{guard.name}</span>
+                    <span className="res-guard-shift">
+                      <Clock size={10} /> {shiftElapsed(guard)}
+                    </span>
+                  </div>
+                  <button
+                    className={`res-call-guard-btn ${isSent ? 'sent' : ''}`}
+                    onClick={() => callGuard(guard.id)}
+                    disabled={!!callingGuardId || isSent}
+                    id={`call-guard-${guard.id}`}
+                    title="Call this guard"
+                  >
+                    {isCalling ? <RefreshCw size={13} className="spin" /> : isSent ? <CheckCircle size={13} /> : <PhoneCall size={13} />}
+                    <span>{isCalling ? 'Calling…' : isSent ? 'Called!' : 'Call'}</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Invite Modal */}
       {showInviteModal && (
+
         <div className="res-modal-overlay" onClick={() => setShowInviteModal(false)}>
           <div className="res-modal animate-fade-in-up" onClick={e => e.stopPropagation()}>
             <div className="res-modal-header">
